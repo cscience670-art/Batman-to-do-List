@@ -124,7 +124,7 @@ npx expo start
 ---
 
 ## 👨‍💻 Author
-**  Sadek Amine
+  Sadek Amine
 )
 
 ---
