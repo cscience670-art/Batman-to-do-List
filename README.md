@@ -124,8 +124,8 @@ npx expo start
 ---
 
 ## 👨‍💻 Author
-**Developed by:** [Your Name]
-**GitHub:** [https://github.com/your-username](https://github.com/your-username)
+**  Sadek Amine
+)
 
 ---
-*Generated with ❤️ for first-year developers.*
+
