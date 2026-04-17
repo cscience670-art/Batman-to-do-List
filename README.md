@@ -91,6 +91,13 @@ CREATE TABLE tasks (
   category_id INT,
   task_date DATE DEFAULT CURRENT_DATE
 );
+CREATE TABLE categories (
+    id INT PRIMARY KEY,
+    name TEXT NOT NULL
+    
+);
+
+
 ```
 
 ### 4. Frontend Setup
