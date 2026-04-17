@@ -43,12 +43,14 @@ This project is engineered to teach:
 ```text
 project-root/
 │
-├── frontend/             # React Native Expo App
-│   ├── App.js            # Main entry point
-│   
+├── todo-app/             # React Native Expo App
+│   ├── App/
+│            ├── index.tsx      # Main entry point
+│            ├── layout.tsx
 │
 ├── backend/              # Node.js Express Server
-│   ├── server.js         # API Initialization
+│   ├── server.js         # API Initialization and Connecting to a PostgreSQL database
+
 │   
 │
 └── README.md
