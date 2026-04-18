@@ -1,7 +1,8 @@
-24567import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, Animated, Dimensions, Modal, ScrollView, Platform,
+  StyleSheet, Animated, Dimensions, Modal, ScrollView,
+  KeyboardAvoidingView, Platform,
 } from "react-native";
 import axios from "axios";
 import * as Notifications from "expo-notifications";
@@ -60,6 +61,7 @@ export default function Index() {
 
   const [bats, setBats] = useState<{ id: number; x: number; anim: Animated.Value }[]>([]);
 
+  /* ── NOTIFICATIONS ── */
   useEffect(() => {
     (async () => {
       const { status } = await Notifications.requestPermissionsAsync();
@@ -67,6 +69,7 @@ export default function Index() {
     })();
   }, []);
 
+  /* ── FETCH ── */
   const fetchTasks = useCallback(async () => {
     try {
       const res = await axios.get(`${API_URL}/tasks`);
@@ -77,32 +80,32 @@ export default function Index() {
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
- const scheduleReminders = async (allTasks: Task[]) => {
-  await Notifications.cancelAllScheduledNotificationsAsync();
+  /* ── REMINDERS ── */
+  const scheduleReminders = async (allTasks: Task[]) => {
+    await Notifications.cancelAllScheduledNotificationsAsync();
+    const today = new Date().toISOString().split("T")[0];
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
 
-  const today = new Date().toISOString().split("T")[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
-
-  for (const t of allTasks) {
-    if (t.completed) continue;
-
-    if (t.date === today || t.date === tomorrow) {
-      const label = t.date === today ? "today" : "tomorrow";
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "🦇 Batman Reminder",
-          body: `"${t.title}" is due ${label}!`,
-        },
-        trigger: {
-          type: "timeInterval",
-          seconds: 5,
-          repeats: false,
-        } as Notifications.TimeIntervalTriggerInput,
-      });
+    for (const t of allTasks) {
+      if (t.completed) continue;
+      if (t.date === today || t.date === tomorrow) {
+        const label = t.date === today ? "today" : "tomorrow";
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: "🦇 Batman Reminder",
+            body: `"${t.title}" is due ${label}!`,
+          },
+          trigger: {
+            type: "timeInterval",
+            seconds: 5,
+            repeats: false,
+          } as Notifications.TimeIntervalTriggerInput,
+        });
+      }
     }
-  }
-};
+  };
+
+  /* ── ADD ── */
   const addTask = async () => {
     if (!task.trim()) return;
     await axios.post(`${API_URL}/tasks`, {
@@ -111,18 +114,21 @@ export default function Index() {
     setTask(""); fetchTasks();
   };
 
-  const toggleTask = async (id: number) => {
+  /* ── TOGGLE ── */
+  const toggleTask = useCallback(async (id: number) => {
     const current = tasks.find((t) => t.id === id);
     if (current && !current.completed) spawnBats();
     await axios.put(`${API_URL}/tasks/${id}`);
     fetchTasks();
-  };
+  }, [tasks]);
 
-  const deleteTask = async (id: number) => {
+  /* ── DELETE ── */
+  const deleteTask = useCallback(async (id: number) => {
     await axios.delete(`${API_URL}/tasks/${id}`);
     fetchTasks();
-  };
+  }, []);
 
+  /* ── EDIT SAVE ── */
   const saveEdit = async () => {
     if (!editTask) return;
     await axios.patch(`${API_URL}/tasks/${editTask.id}`, {
@@ -131,16 +137,20 @@ export default function Index() {
     setEditTask(null); fetchTasks();
   };
 
+  /* ── BATS ── */
   const spawnBats = () => {
-    const newBats = Array.from({ length: 80 }).map((_, i) => {
+    const newBats = Array.from({ length: 40 }).map((_, i) => {
       const anim = new Animated.Value(0);
-      Animated.timing(anim, { toValue: 1, duration: 1000, useNativeDriver: true }).start();
+      Animated.timing(anim, {
+        toValue: 1, duration: 1000, useNativeDriver: true,
+      }).start();
       return { id: Date.now() + i, x: Math.random() * (SCREEN_WIDTH - 40), anim };
     });
     setBats(newBats);
     setTimeout(() => setBats([]), 1200);
   };
 
+  /* ── FILTER ── */
   const filtered = tasks.filter((t) => {
     const matchSearch = t.title.toLowerCase().includes(search.toLowerCase());
     const matchStatus =
@@ -150,16 +160,60 @@ export default function Index() {
     return matchSearch && matchStatus && matchCat;
   });
 
+  /* ── STATS ── */
   const total = tasks.length;
   const done = tasks.filter((t) => t.completed).length;
   const rate = total === 0 ? 0 : Math.round((done / total) * 100);
-
   const byCategory = defaultCategories.map((c) => ({
     ...c,
     count: tasks.filter((t) => t.category_id === c.id).length,
     doneCount: tasks.filter((t) => t.category_id === c.id && t.completed).length,
   })).filter((c) => c.count > 0);
 
+  /* ── RENDER TASK ITEM (memoized for smoothness) ── */
+  const renderTask = useCallback(({ item }: { item: Task }) => (
+    <View style={styles.taskItem}>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.taskText, item.completed && styles.completed]}>
+          {item.title}
+        </Text>
+        <Text style={styles.meta}>
+          {emojiMap[item.category_name ?? ""] ?? "📌"} {item.category_name} • {item.date}
+        </Text>
+      </View>
+
+      <View style={styles.taskActions}>
+        {/* EDIT */}
+        <TouchableOpacity
+          onPress={() => {
+            setEditTask(item);
+            setEditTitle(item.title);
+            setEditDate(item.date);
+            setEditCategory(
+              defaultCategories.find(c => c.id === item.category_id) ?? defaultCategories[0]
+            );
+          }}
+          style={styles.actionBtn}
+        >
+          <Text style={styles.actionIcon}>✏️</Text>
+        </TouchableOpacity>
+
+        {/* TOGGLE */}
+        <TouchableOpacity onPress={() => toggleTask(item.id)} style={styles.actionBtn}>
+          <Text style={styles.actionIcon}>{item.completed ? "✅" : "⭕"}</Text>
+        </TouchableOpacity>
+
+        {/* DELETE */}
+        <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.actionBtn}>
+          <Text style={styles.actionIcon}>🗑️</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  ), [tasks]);
+
+  /* ══════════════════
+     STATS SCREEN
+  ══════════════════ */
   if (screen === "stats") {
     return (
       <View style={styles.container}>
@@ -179,14 +233,12 @@ export default function Index() {
           <Text style={styles.statSub}>{done} / {total} tasks completed</Text>
         </View>
 
-        <ScrollView>
+        <ScrollView showsVerticalScrollIndicator={false}>
           {byCategory.map((c) => {
             const pct = c.count === 0 ? 0 : Math.round((c.doneCount / c.count) * 100);
             return (
               <View key={c.id} style={styles.statCard}>
-                <Text style={styles.statLabel}>
-                  {emojiMap[c.name]} {c.name}
-                </Text>
+                <Text style={styles.statLabel}>{emojiMap[c.name]} {c.name}</Text>
                 <View style={styles.progressBg}>
                   <View style={[styles.progressFill, { width: `${pct}%` as any, backgroundColor: "#facc15" }]} />
                 </View>
@@ -199,124 +251,401 @@ export default function Index() {
     );
   }
 
+  /* ══════════════════
+     TASKS SCREEN
+  ══════════════════ */
   return (
-    <View style={styles.container}>
-      <View style={styles.navRow}>
-        <Text style={styles.title}>🦇 Batman Tasks</Text>
-        <TouchableOpacity onPress={() => setScreen("stats")} style={styles.statsBtn}>
-          <Text style={{ color: "#fff", fontWeight: "bold" }}>📊 Stats</Text>
-        </TouchableOpacity>
-      </View>
+    /* 🔑 KeyboardAvoidingView fixes keyboard covering inputs */
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 60 : 0}
+    >
+      <View style={styles.container}>
 
-      <TextInput
-        placeholder="🔍 Search tasks..."
-        value={search}
-        onChangeText={setSearch}
-        style={styles.input}
-        placeholderTextColor="#94a3b8"
-      />
-
-      <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
-        {(["all", "pending", "done"] as const).map((s) => (
-          <TouchableOpacity
-            key={s}
-            onPress={() => setFilterStatus(s)}
-            style={[styles.filterBtn, filterStatus === s && styles.filterBtnActive]}
-          >
-            <Text style={{ color: "#fff", textTransform: "capitalize" }}>{s}</Text>
+        {/* HEADER */}
+        <View style={styles.navRow}>
+          <Text style={styles.title}>🦇 Batman Tasks</Text>
+          <TouchableOpacity onPress={() => setScreen("stats")} style={styles.statsBtn}>
+            <Text style={{ color: "#fff", fontWeight: "bold" }}>📊 Stats</Text>
           </TouchableOpacity>
-        ))}
-      </View>
+        </View>
 
-      <FlatList
-        horizontal
-        data={[{ id: 0, name: "All" } as Category, ...defaultCategories]}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            onPress={() => {
-              setFilterCategory(item.id === 0 ? null : item.id);
-              if (item.id !== 0) setSelectedCategory(item);
-            }}
-            style={[
-              styles.category,
-              (item.id === 0 ? filterCategory === null : filterCategory === item.id) && styles.selectedCategory,
-            ]}
-          >
-            <Text style={{ color: "#fff" }}>
-              {item.id === 0 ? "🗂️ All" : `${emojiMap[item.name]} ${item.name}`}
-            </Text>
-          </TouchableOpacity>
-        )}
-        style={{ marginBottom: 8 }}
-      />
-
-      <TextInput value={date} onChangeText={setDate} style={styles.input} placeholderTextColor="#94a3b8" />
-
-      <View style={styles.inputContainer}>
+        {/* SEARCH */}
         <TextInput
-          placeholder="Add task..."
-          value={task}
-          onChangeText={setTask}
+          placeholder="🔍 Search tasks..."
+          value={search}
+          onChangeText={setSearch}
           style={styles.input}
           placeholderTextColor="#94a3b8"
         />
-        <TouchableOpacity onPress={addTask} style={styles.addButton}>
-          <Text style={styles.addText}>+</Text>
-        </TouchableOpacity>
-      </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item }) => (
-          <View style={styles.taskItem}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.taskText, item.completed && styles.completed]}>
-                {item.title}
+        {/* FILTER STATUS */}
+        <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+          {(["all", "pending", "done"] as const).map((s) => (
+            <TouchableOpacity
+              key={s}
+              onPress={() => setFilterStatus(s)}
+              style={[styles.filterBtn, filterStatus === s && styles.filterBtnActive]}
+            >
+              <Text style={styles.filterText}>{s}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* CATEGORY FILTER — bigger */}
+        <FlatList
+          horizontal
+          data={[{ id: 0, name: "All" } as Category, ...defaultCategories]}
+          keyExtractor={(item) => item.id.toString()}
+          showsHorizontalScrollIndicator={false}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              onPress={() => {
+                setFilterCategory(item.id === 0 ? null : item.id);
+                if (item.id !== 0) setSelectedCategory(item);
+              }}
+              style={[
+                styles.category,
+                (item.id === 0 ? filterCategory === null : filterCategory === item.id)
+                  && styles.selectedCategory,
+              ]}
+            >
+              <Text style={styles.categoryText}>
+                {item.id === 0 ? "🗂️ All" : `${emojiMap[item.name]} ${item.name}`}
               </Text>
-              <Text style={styles.meta}>
-                {emojiMap[item.category_name ?? ""] ?? "📌"} {item.category_name} • {item.date}
-              </Text>
+            </TouchableOpacity>
+          )}
+          style={{ marginBottom: 10 }}
+        />
+
+        {/* DATE INPUT */}
+        <TextInput
+          value={date}
+          onChangeText={setDate}
+          style={styles.input}
+          placeholderTextColor="#94a3b8"
+          placeholder="Date (YYYY-MM-DD)"
+        />
+
+        {/* ADD TASK */}
+        <View style={styles.inputContainer}>
+          <TextInput
+            placeholder="Add task..."
+            value={task}
+            onChangeText={setTask}
+            style={styles.input}
+            placeholderTextColor="#94a3b8"
+            onSubmitEditing={addTask}
+            returnKeyType="done"
+          />
+          <TouchableOpacity onPress={addTask} style={styles.addButton}>
+            <Text style={styles.addText}>+</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* TASK LIST */}
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={renderTask}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={10}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        />
+
+        {/* EDIT MODAL */}
+        <Modal visible={!!editTask} transparent animationType="slide">
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalBox}>
+                <Text style={styles.modalTitle}>✏️ Edit Task</Text>
+
+                <TextInput
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                  style={styles.input}
+                  placeholderTextColor="#94a3b8"
+                  placeholder="Task title"
+                />
+                <TextInput
+                  value={editDate}
+                  onChangeText={setEditDate}
+                  style={styles.input}
+                  placeholderTextColor="#94a3b8"
+                  placeholder="Date (YYYY-MM-DD)"
+                />
+
+                <FlatList
+                  horizontal
+                  data={defaultCategories}
+                  keyExtractor={(item) => item.id.toString()}
+                  showsHorizontalScrollIndicator={false}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      onPress={() => setEditCategory(item)}
+                      style={[
+                        styles.category,
+                        editCategory.id === item.id && styles.selectedCategory,
+                      ]}
+                    >
+                      <Text style={styles.categoryText}>
+                        {emojiMap[item.name]} {item.name}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  style={{ marginBottom: 14 }}
+                />
+
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <TouchableOpacity onPress={saveEdit} style={[styles.addButton, { flex: 1 }]}>
+                    <Text style={[styles.addText, { textAlign: "center" }]}>Save</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setEditTask(null)}
+                    style={[styles.addButton, { flex: 1, backgroundColor: "#ef4444" }]}
+                  >
+                    <Text style={[styles.addText, { textAlign: "center" }]}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
-          </View>
-        )}
-      />
+          </KeyboardAvoidingView>
+        </Modal>
 
-      {bats.map((bat) => (
-        <Animated.View key={bat.id} style={{ position: "absolute" }}>
-          <Text>🦇</Text>
-        </Animated.View>
-      ))}
-    </View>
+        {/* BATS */}
+        {bats.map((bat) => (
+          <Animated.View
+            key={bat.id}
+            style={{
+              position: "absolute", bottom: 80, left: bat.x,
+              transform: [
+                { translateY: bat.anim.interpolate({ inputRange: [0, 1], outputRange: [0, -300] }) },
+                { scale: bat.anim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] }) },
+              ],
+              opacity: bat.anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+            }}
+          >
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Text key={i} style={{ fontSize: 24 }}>🦇🦇</Text>
+            ))}
+          </Animated.View>
+        ))}
+
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0f172a", padding: 20 },
-  title: { fontSize: 24, color: "#fff", fontWeight: "bold" },
-  navRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  navBack: { color: "#94a3b8", fontSize: 16 },
-  statsBtn: { backgroundColor: "#1e293b", padding: 8, borderRadius: 10 },
-  inputContainer: { flexDirection: "row", marginVertical: 6 },
-  input: { flex: 1, backgroundColor: "#1e293b", padding: 10, borderRadius: 10, color: "#fff", marginVertical: 4 },
-  addButton: { backgroundColor: "#22c55e", padding: 10, borderRadius: 10, marginLeft: 10, justifyContent: "center" },
-  addText: { color: "#fff", fontSize: 18 },
-  category: { padding: 10, marginRight: 8, backgroundColor: "#1e293b", borderRadius: 10 },
-  selectedCategory: { backgroundColor: "#22c55e" },
-  filterBtn: { paddingHorizontal: 14, paddingVertical: 6, backgroundColor: "#1e293b", borderRadius: 20 },
-  filterBtnActive: { backgroundColor: "#7c3aed" },
-  taskItem: { backgroundColor: "#1e293b", padding: 14, borderRadius: 10, marginBottom: 10 },
-  taskText: { color: "#fff", fontSize: 15 },
-  completed: { textDecorationLine: "line-through", color: "#94a3b8" },
-  meta: { color: "#94a3b8", fontSize: 12, marginTop: 2 },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", padding: 20 },
-  modalBox: { backgroundColor: "#1e293b", borderRadius: 16, padding: 20 },
-  modalTitle: { color: "#fff", fontSize: 20, fontWeight: "bold", marginBottom: 12 },
-  statCard: { backgroundColor: "#1e293b", borderRadius: 12, padding: 16, marginBottom: 12 },
-  statLabel: { color: "#94a3b8", fontSize: 14, marginBottom: 6 },
-  statBig: { color: "#22c55e", fontSize: 48, fontWeight: "bold" },
-  statSub: { color: "#94a3b8", fontSize: 12, marginTop: 4 },
-  progressBg: { height: 10, backgroundColor: "#0f172a", borderRadius: 5, overflow: "hidden", marginVertical: 6 },
-  progressFill: { height: 10, backgroundColor: "#22c55e", borderRadius: 5 },
+  /* ── MAIN ── */
+  container: {
+    flex: 1,
+    backgroundColor: "transparent", // ✅ IMPORTANT (show background)
+    padding: 20,
+  },
+
+  title: {
+    fontSize: 24,
+    color: "#fff",
+    fontWeight: "bold",
+  },
+
+  /* ── NAV ── */
+  navRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+
+  navBack: {
+    color: "#94a3b8",
+    fontSize: 16,
+  },
+
+  statsBtn: {
+    backgroundColor: "rgba(30, 41, 59, 0.85)", // ✅ glass effect
+    padding: 10,
+    borderRadius: 10,
+  },
+
+  /* ── INPUT ── */
+  inputContainer: {
+    flexDirection: "row",
+    marginVertical: 6,
+  },
+
+  input: {
+    flex: 1,
+    backgroundColor: "rgba(30, 41, 59, 0.85)", // ✅ transparent card
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    color: "#fff",
+    marginVertical: 4,
+    fontSize: 15,
+  },
+
+  addButton: {
+    backgroundColor: "#22c55e",
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    marginLeft: 10,
+    justifyContent: "center",
+  },
+
+  addText: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "bold",
+  },
+
+  /* ── CATEGORY ── */
+  category: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginRight: 8,
+    backgroundColor: "rgba(30, 41, 59, 0.85)", // ✅ glass
+    borderRadius: 12,
+  },
+
+  selectedCategory: {
+    backgroundColor: "#22c55e",
+  },
+
+  categoryText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  /* ── FILTER ── */
+  filterBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: "rgba(30, 41, 59, 0.85)",
+    borderRadius: 20,
+  },
+
+  filterBtnActive: {
+    backgroundColor: "#7c3aed",
+  },
+
+  filterText: {
+    color: "#fff",
+    textTransform: "capitalize",
+    fontSize: 14,
+  },
+
+  /* ── TASK ITEM ── */
+  taskItem: {
+    backgroundColor: "rgba(30, 41, 59, 0.8)", // ✅ glass card
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  taskText: {
+    color: "#fff",
+    fontSize: 15,
+  },
+
+  completed: {
+    textDecorationLine: "line-through",
+    color: "#94a3b8",
+  },
+
+  meta: {
+    color: "#94a3b8",
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  taskActions: {
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+  },
+
+  actionBtn: {
+    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    padding: 8,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  actionIcon: {
+    fontSize: 18,
+  },
+
+  /* ── MODAL ── */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  modalBox: {
+    backgroundColor: "rgba(30, 41, 59, 0.95)",
+    borderRadius: 16,
+    padding: 20,
+  },
+
+  modalTitle: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 14,
+  },
+
+  /* ── STATS ── */
+  statCard: {
+    backgroundColor: "rgba(30, 41, 59, 0.85)",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+
+  statLabel: {
+    color: "#94a3b8",
+    fontSize: 14,
+    marginBottom: 6,
+  },
+
+  statBig: {
+    color: "#22c55e",
+    fontSize: 48,
+    fontWeight: "bold",
+  },
+
+  statSub: {
+    color: "#94a3b8",
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  progressBg: {
+    height: 10,
+    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    borderRadius: 5,
+    overflow: "hidden",
+    marginVertical: 6,
+  },
+
+  progressFill: {
+    height: 10,
+    backgroundColor: "#22c55e",
+    borderRadius: 5,
+  },
 });
